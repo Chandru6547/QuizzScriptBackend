@@ -9,33 +9,45 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Multer setup for file uploads
 const upload = multer({ dest: "uploads/" });
 
 app.post("/upload", upload.array("files", 10), (req, res) => {
     try {
+        console.log("Received file upload request.");
+
         let studentData = {};
         let allTestNames = new Set();
-        let testMarks = {}; // Store valid marks for each test
-        let outputFileName = req.body.outputFileName || "output.xlsx"; // Get filename or set default
+        let testMarks = {};
+
+        if (!req.files || req.files.length === 0) {
+            console.warn("No files uploaded.");
+            return res.status(400).json({ error: "No files uploaded" });
+        }
 
         req.files.forEach((file, index) => {
+            console.log(`Processing file: ${file.originalname}`);
+
             const testName = `Test_${index + 1}`;
             const workbook = XLSX.readFile(file.path);
             const sheetName = "Participant Data";
 
             if (!workbook.Sheets[sheetName]) {
-                console.log(`INFO: Sheet "${sheetName}" not found in ${file.originalname}`);
+                console.log(`⚠️ INFO: Sheet "${sheetName}" not found in ${file.originalname}`);
                 return;
             }
 
             const sheet = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName]);
+            console.log(`✅ Found ${sheet.length} rows in sheet "${sheetName}".`);
+
             allTestNames.add(testName);
             testMarks[testName] = [];
 
             sheet.forEach(row => {
                 let rollNumber = row["First Name"] || row["Firstname"];
-                if (!rollNumber) return;
+                if (!rollNumber) {
+                    console.warn("⚠️ Skipping row without roll number:", row);
+                    return;
+                }
 
                 rollNumber = rollNumber.trim().toLowerCase();
                 let percentage = row["Accuracy"] || "Absent";
@@ -50,52 +62,36 @@ app.post("/upload", upload.array("files", 10), (req, res) => {
 
                 if (!studentData[rollNumber]) {
                     studentData[rollNumber] = { RollNumber: rollNumber };
+                    console.log(`ℹ️ Added student: ${rollNumber}`);
                 }
 
                 studentData[rollNumber][testName] = percentage;
+                console.log(`📌 ${rollNumber} - ${testName}: ${percentage}`);
             });
 
-            fs.unlinkSync(file.path); // Remove uploaded file after processing
+            console.log(`🗑️ Deleting temporary file: ${file.path}`);
+            fs.unlinkSync(file.path);
         });
 
-        // Fill absent marks with random valid values
+        // Filling missing marks
+        console.log("🔄 Filling missing marks for absent students...");
         Object.values(studentData).forEach(student => {
             allTestNames.forEach(testName => {
                 if (!student[testName] || student[testName] === "Absent") {
-                    student[testName] = getRandomMark(testMarks[testName]);
+                    let randomMark = getRandomMark(testMarks[testName]);
+                    student[testName] = randomMark;
+                    console.log(`🎲 Assigned random mark (${randomMark}) to ${student.RollNumber} for ${testName}`);
                 }
             });
         });
 
         const finalData = Object.values(studentData);
-
-        // Convert JSON to Excel
-        const newWorkbook = XLSX.utils.book_new();
-        const newSheet = XLSX.utils.json_to_sheet(finalData);
-        XLSX.utils.book_append_sheet(newWorkbook, newSheet, "Consolidated Data");
-        
-        const outputFilePath = path.join(__dirname, outputFileName);
-        XLSX.writeFile(newWorkbook, outputFilePath);
-
-        res.json({ message: "File processed successfully", downloadLink: `/download?fileName=${outputFileName}` });
+        console.log("✅ File processing complete. Sending response...");
+        res.json({ message: "File processed successfully", data: finalData });
 
     } catch (error) {
-        console.error(error);
+        console.error("❌ Error during file processing:", error);
         res.status(500).json({ error: "Internal Server Error" });
-    }
-});
-
-// Endpoint to download processed Excel file
-app.get("/download", (req, res) => {
-    console.log(req.query);
-    
-    const fileName = req.query.filename || "output.xlsx";
-    const filePath = path.join(__dirname, fileName);
-
-    if (fs.existsSync(filePath)) {
-        res.download(filePath);
-    } else {
-        res.status(404).json({ error: "File not found" });
     }
 });
 
@@ -104,4 +100,4 @@ function getRandomMark(marks) {
 }
 
 const PORT = 5000;
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+// app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
