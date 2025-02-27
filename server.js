@@ -102,6 +102,3 @@ app.get("/download", (req, res) => {
 function getRandomMark(marks) {
     return marks.length > 0 ? marks[Math.floor(Math.random() * marks.length)] : "0";
 }
-
-const PORT = 5000;
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
